@@ -22,3 +22,15 @@ th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--bd
 th { background: var(--band); cursor: pointer; position: sticky; top: 0; white-space: nowrap; user-select: none; }
 td.num { text-align: right; font-weight: 700; }
 tr.grupo td { background: var(--ac); color: var(--acx); font-weight: 700; font-size: 1.05em; }
+.botao.sec { background: var(--card); color: var(--ac); }
+.rodape { margin-top: 16px; }
+.fontes { background: var(--card); border: 1px solid var(--bd); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
+.fontes ul { list-style: none; margin: 0; padding: 0; }
+.fontes li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.fontes li button { margin-left: auto; min-height: 40px; min-width: 40px; border: 1px solid var(--bd); border-radius: 8px; background: var(--card); color: var(--tx); cursor: pointer; }
+.fontes p { margin: 6px 0 2px; color: var(--mut); }
+.campo { width: 100%; min-width: 120px; min-height: 44px; padding: 0 10px; font: inherit; border: 2px solid var(--bd); border-radius: 8px; background: var(--card); color: var(--tx); }
+.campo.preco { width: 110px; min-width: 90px; text-align: right; font-weight: 700; }
+.campo:focus { outline: 3px solid var(--ac); }
+.erro { background: var(--card); color: var(--tx); border: 2px solid #c0392b; border-radius: 10px; padding: 16px; margin: 16px; }
+.erro pre { white-space: pre-wrap; overflow: auto; font-size: 14px; }

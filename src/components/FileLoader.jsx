@@ -1,43 +1,32 @@
 import { lerPlanilha } from '../utils/parseExcel'
 import { useState } from 'react'
 
-// Botão que abre o seletor de arquivos e entrega os itens lidos ao App.
-// "props" são os parâmetros do componente: aqui recebemos funções e valores do pai.
+// Botão que permite escolher UMA OU MAIS planilhas (atributo "multiple").
+// Entrega ao App uma lista de { nome, itens }.
 export default function FileLoader({ onCarregar }) {
-  const [carregando, setCarregando] = useState(false)
-
   async function aoEscolher(evento) {
-    const arquivos = Array.from(evento.target.files ?? [])
+    const arquivos = [...evento.target.files]
+    evento.target.value = '' // permite escolher o mesmo arquivo de novo
     if (!arquivos.length) return
-
-    setCarregando(true)
     try {
-      const planilhas = await Promise.all(
-        arquivos.map(async (arquivo) => ({
-          nome: arquivo.name,
-          itens: await lerPlanilha(arquivo),
-        })),
-      )
-      onCarregar(planilhas)
-    } catch {
-      alert('Não foi possível ler o arquivo. Use uma planilha Excel (.xlsx) ou CSV.')
-    } finally {
-      evento.target.value = ''
-      setCarregando(false)
+      const lidos = []
+      for (const arquivo of arquivos) {
+        try {
+          lidos.push({ nome: arquivo.name, itens: await lerPlanilha(arquivo) })
+        } catch {
+          alert(`Não foi possível ler "${arquivo.name}". Use uma planilha Excel (.xlsx) ou CSV.`)
+        }
+      }
+      if (lidos.length) onCarregar(lidos)
+    } catch (erro) {
+      alert('Erro ao adicionar a planilha: ' + erro.message)
     }
   }
 
   return (
-    <label className="botao" aria-busy={carregando}>
-      {carregando ? 'Lendo planilha...' : 'Adicionar planilha'}
-      <input
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        onChange={aoEscolher}
-        multiple
-        disabled={carregando}
-        hidden
-      />
+    <label className="botao">
+      Adicionar planilha
+      <input type="file" accept=".xlsx,.xls,.csv" multiple onChange={aoEscolher} hidden />
     </label>
   )
 }
