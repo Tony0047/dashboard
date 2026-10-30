@@ -139,7 +139,8 @@ function Painel() {
           </p>
           <DataTable itens={visiveis} colunas={COLUNAS_TELA} ordem={ordem} onOrdenar={ordenarPor} onEditar={editar} />
           <div className="barra rodape">
-            <button className="botao" onClick={() => exportarXlsx(ordenados, COLUNAS_TELA, 'cotacao_final.xlsx')}>
+            <button className="botao" onClick={() => exportarXlsx(visiveis, COLUNAS_TELA, 
+            `cotacao_final${bairro ? '_' + bairro.replace(/\s+/g, '_') : ''}.xlsx`)}>
               Gerar arquivo final (com preços)
             </button>
             <button className="botao sec" onClick={limparPlanilhas}>

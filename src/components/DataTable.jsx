@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { formatarPreco } from '../utils/exportar'
 
 // Células editáveis: preço, anotação e código de barras (só quando a planilha não trouxe o EAN).
 function Celula({ item, coluna, onEditar }) {
@@ -10,7 +11,8 @@ function Celula({ item, coluna, onEditar }) {
         inputMode="decimal"
         placeholder="0,00"
         value={item.preco}
-        onChange={(e) => onEditar('preco', item.codigo, e.target.value)}
+        onChange={(e) => onEditar('preco', item.codigo, e.target.value.replace(/[^\d.,]/g, ''))}
+        onBlur={(e) => onEditar('preco', item.codigo, formatarPreco(e.target.value))}
         aria-label={`Preço de ${item.produto}`}
       />
     )
