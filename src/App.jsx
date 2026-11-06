@@ -43,6 +43,29 @@ function Painel() {
   const [bairro, setBairro] = useState('') // '' = todos
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState({ chave: 'bairro', dir: 1 })
+  
+  // Ordem das colunas na tela (salva no aparelho): lista de chaves.
+  const [ordemCols, setOrdemCols] = useLocalStorage('painel:ordemColunas', COLUNAS_TELA.map((c) => c.chave))
+
+  // Monta a lista de colunas na ordem salva (ignora chaves inválidas e acrescenta as que faltarem).
+  const colunas = useMemo(() => {
+    const porChave = Object.fromEntries(COLUNAS_TELA.map((c) => [c.chave, c]))
+    const salvas = ordemCols.filter((k) => porChave[k])
+    const faltando = COLUNAS_TELA.map((c) => c.chave).filter((k) => !salvas.includes(k))
+    return [...salvas, ...faltando].map((k) => porChave[k])
+  }, [ordemCols])
+
+  // Troca a coluna de lugar com a vizinha: delta = -1 (esquerda) ou +1 (direita).
+  function moverColuna(chave, delta) {
+    const ids = colunas.map((c) => c.chave)
+    const i = ids.indexOf(chave)
+    const j = i + delta
+    if (j < 0 || j >= ids.length) return
+    const temp = ids[i]
+    ids[i] = ids[j]
+    ids[j] = temp
+    setOrdemCols(ids)
+  }
 
   // 1) A + B = resultado (soma das quantidades)
   const mesclados = useMemo(() => mesclar(arquivos), [arquivos])
@@ -110,6 +133,9 @@ function Painel() {
     }
   }
 
+
+
+  
   return (
     <main>
       <h1>Painel de Cotação</h1>
@@ -137,14 +163,21 @@ function Painel() {
             <b>{visiveis.length}</b> itens · <b>{totalUnidades}</b> unidades · preços preenchidos:{' '}
             <b>{comPreco}</b> de {completos.length}
           </p>
-          <DataTable itens={visiveis} colunas={COLUNAS_TELA} ordem={ordem} onOrdenar={ordenarPor} onEditar={editar} />
+          <DataTable itens={visiveis} colunas={colunas} ordem={ordem} onOrdenar={ordenarPor} onMover={moverColuna}onEditar={editar} />
           <div className="barra rodape">
-            <button className="botao" onClick={() => exportarXlsx(visiveis, COLUNAS_TELA, 
-            `cotacao_final${bairro ? '_' + bairro.replace(/\s+/g, '_') : ''}.xlsx`)}>
-              Gerar arquivo final (com preços)
+            <button className="botao" 
+                    onClick={() => 
+                    exportarXlsx(visiveis, colunas, `cotacao_final${bairro ? '_' + bairro.replace(/\s+/g, '_') : ''}.xlsx`)}>
+                    Gerar arquivo final (com preços)
             </button>
-            <button className="botao sec" onClick={limparPlanilhas}>
-              Limpar planilhas
+            <button className="botao sec" 
+                    onClick={() => 
+                    setOrdemCols(COLUNAS_TELA.map((c) => c.chave))}>
+                    Restaurar ordem das colunas
+            </button>
+            <button className="botao sec" 
+                    onClick={limparPlanilhas}>
+                    Limpar planilhas
             </button>
           </div>
         </>

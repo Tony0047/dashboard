@@ -34,3 +34,6 @@ tr.grupo td { background: var(--ac); color: var(--acx); font-weight: 700; font-s
 .campo:focus { outline: 3px solid var(--ac); }
 .erro { background: var(--card); color: var(--tx); border: 2px solid #c0392b; border-radius: 10px; padding: 16px; margin: 16px; }
 .erro pre { white-space: pre-wrap; overflow: auto; font-size: 14px; }
+.cab { display: flex; align-items: center; gap: 6px; }
+.seta { min-width: 36px; min-height: 36px; padding: 0; border: 1px solid var(--bd); border-radius: 8px; background: var(--card); color: var(--ac); font-size: 14px; cursor: pointer; }
+.seta:disabled { opacity: 0.3; cursor: default; }

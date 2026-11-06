@@ -2,7 +2,7 @@ import { Fragment } from 'react'
 import { formatarPreco } from '../utils/exportar'
 
 // Células editáveis: preço, anotação e código de barras (só quando a planilha não trouxe o EAN).
-function Celula({ item, coluna, onEditar }) {
+function Celula({ item, coluna, onEditar,}) {
   const { chave } = coluna
   if (chave === 'preco') {
     return (
@@ -45,7 +45,7 @@ function Celula({ item, coluna, onEditar }) {
 
 // Tabela de itens. Tocar no título de uma coluna ordena por ela.
 // Quando a ordenação é por bairro, aparece uma faixa de título a cada bairro novo.
-export default function DataTable({ itens, colunas, ordem, onOrdenar, onEditar }) {
+export default function DataTable({ itens, colunas, ordem, onOrdenar, onEditar, onMover }){
   const agrupar = ordem.chave === 'bairro'
   let anterior = null
 
@@ -54,10 +54,37 @@ export default function DataTable({ itens, colunas, ordem, onOrdenar, onEditar }
       <table>
         <thead>
           <tr>
-            {colunas.map((c) => (
+              {colunas.map((c, i) => (
               <th key={c.chave} onClick={() => onOrdenar(c.chave)}>
-                {c.titulo}
-                {ordem.chave === c.chave ? (ordem.dir > 0 ? ' ▲' : ' ▼') : ''}
+                <div className="cab">
+                  {/* stopPropagation: evita que o toque na seta também ordene a coluna */}
+                  <button
+                    className="seta"
+                    disabled={i === 0}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMover(c.chave, -1)
+                    }}
+                    aria-label={`Mover ${c.titulo} para a esquerda`}
+                  >
+                    ◀
+                  </button>
+                  <span>
+                    {c.titulo}
+                    {ordem.chave === c.chave ? (ordem.dir > 0 ? ' ▲' : ' ▼') : ''}
+                  </span>
+                  <button
+                    className="seta"
+                    disabled={i === colunas.length - 1}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMover(c.chave, 1)
+                    }}
+                    aria-label={`Mover ${c.titulo} para a direita`}
+                  >
+                    ▶
+                  </button>
+                </div>
               </th>
             ))}
           </tr>
