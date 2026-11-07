@@ -1,186 +1,326 @@
 import { useMemo, useState } from 'react'
 import './App.css'
 import useLocalStorage from './hooks/useLocalStorage'
-import { mesclar } from './utils/mesclar'
+import { reconciliar, layoutVazio } from './utils/layout'
+import {
+  texto, normalizar, preencher, valorCelula, chaveLinha, compararValores, somarLinhas, seguroParaExcel,
+} from './utils/tabela'
 import { exportarXlsx, paraNumero } from './utils/exportar'
 import FileLoader from './components/FileLoader'
 import ArquivosCarregados from './components/ArquivosCarregados'
-import BairroFilter from './components/BairroFilter'
 import DataTable from './components/DataTable'
+import PainelFiltro from './components/PainelFiltro'
+import DialogoAdicionar from './components/DialogoAdicionar'
+import DialogoSoma from './components/DialogoSoma'
 import ErroTela from './components/ErroTela'
 
-// Colunas mostradas na tela e no arquivo exportado (preço fica ao lado do produto).
-const COLUNAS_TELA = [
-  { chave: 'codigo', titulo: 'Código' },
-  { chave: 'produto', titulo: 'Produto' },
-  { chave: 'preco', titulo: 'Preço (R$)' },
-  { chave: 'obs', titulo: 'Anotação' },
-  { chave: 'ean', titulo: 'EAN / Cód. barras' },
-  { chave: 'fabricante', titulo: 'Fabricante' },
-  { chave: 'quantidade', titulo: 'Qtd' },
-  { chave: 'bairro', titulo: 'Bairro' },
-  { chave: 'tipo', titulo: 'Tipo' },
-]
-
-// Compara dois itens pela coluna escolhida; empate desempata pelo nome do produto.
-function comparar(a, b, { chave, dir }) {
-  const x = chave === 'preco' ? paraNumero(a.preco) : a[chave]
-  const y = chave === 'preco' ? paraNumero(b.preco) : b[chave]
-  const c =
-    typeof x === 'number' && typeof y === 'number'
-      ? x - y
-      : String(x).localeCompare(String(y), 'pt-BR', { numeric: true })
-  return c ? c * dir : a.produto.localeCompare(b.produto, 'pt-BR')
-}
-
 function Painel() {
-  // Dados que sobrevivem ao fechar o app (hook personalizado).
-  const [arquivos, setArquivos] = useLocalStorage('painel:arquivos', [])
-  const [precos, setPrecos] = useLocalStorage('painel:precos', {}) // { codigo: "12,50" }
-  const [obs, setObs] = useLocalStorage('painel:obs', {})
-  const [barras, setBarras] = useLocalStorage('painel:barras', {})
+  // Dados que sobrevivem ao fechar o app.
+  const [arquivos, setArquivos] = useLocalStorage('painel2:arquivos', []) // [{ nome, linhas, colunas }]
+  const [layouts, setLayouts] = useLocalStorage('painel2:layouts', {}) // um layout por quantidade de colunas
+  const [valores, setValores] = useLocalStorage('painel2:valores', {}) // { idColuna: { chave: texto } }
+  const [soma, setSoma] = useLocalStorage('painel2:soma', null) // { chaves: [origem], qtd: origem }
   // Estado só da tela atual.
-  const [bairro, setBairro] = useState('') // '' = todos
   const [busca, setBusca] = useState('')
-  const [ordem, setOrdem] = useState({ chave: 'bairro', dir: 1 })
-  
-  // Ordem das colunas na tela (salva no aparelho): lista de chaves.
-  const [ordemCols, setOrdemCols] = useLocalStorage('painel:ordemColunas', COLUNAS_TELA.map((c) => c.chave))
+  const [ordem, setOrdem] = useState({ id: null, dir: 1 })
+  const [filtros, setFiltros] = useState({}) // { idColuna: [valores normalizados] }
+  const [dialogo, setDialogo] = useState(null) // { tipo: 'filtro' | 'soma' | 'adicionar', posicao? }
 
-  // Monta a lista de colunas na ordem salva (ignora chaves inválidas e acrescenta as que faltarem).
-  const colunas = useMemo(() => {
-    const porChave = Object.fromEntries(COLUNAS_TELA.map((c) => [c.chave, c]))
-    const salvas = ordemCols.filter((k) => porChave[k])
-    const faltando = COLUNAS_TELA.map((c) => c.chave).filter((k) => !salvas.includes(k))
-    return [...salvas, ...faltando].map((k) => porChave[k])
-  }, [ordemCols])
+  // ---- Colunas (layout) ----
+  const nCols = Math.max(0, ...arquivos.map((a) => a.colunas))
+  const layoutSalvo = layouts[nCols] ?? layoutVazio
+  const layout = useMemo(() => reconciliar(layoutSalvo, nCols), [layoutSalvo, nCols])
+  const colunas = layout.colunas
+  const porId = useMemo(() => Object.fromEntries(colunas.map((c) => [c.id, c])), [colunas])
+  const mudarLayout = (fn) =>
+  setLayouts((ls) => ({ ...ls, [nCols]: fn(reconciliar(ls[nCols] ?? layoutVazio, nCols)) }))
 
-  // Troca a coluna de lugar com a vizinha: delta = -1 (esquerda) ou +1 (direita).
-  function moverColuna(chave, delta) {
-    const ids = colunas.map((c) => c.chave)
-    const i = ids.indexOf(chave)
-    const j = i + delta
-    if (j < 0 || j >= ids.length) return
-    const temp = ids[i]
-    ids[i] = ids[j]
-    ids[j] = temp
-    setOrdemCols(ids)
-  }
-
-  // 1) A + B = resultado (soma das quantidades)
-  const mesclados = useMemo(() => mesclar(arquivos), [arquivos])
-
-  // 2) Acrescenta preço, anotação e código de barras digitados à mão
-  const completos = useMemo(
-    () =>
-      mesclados.map((i) => {
-        const temEan = String(i.ean) !== ''
-        return {
-          ...i,
-          temEan,
-          ean: temEan ? i.ean : (barras[i.codigo] ?? ''),
-          preco: precos[i.codigo] ?? '',
-          obs: obs[i.codigo] ?? '',
-        }
-      }),
-    [mesclados, precos, obs, barras],
+  // ---- Linhas ----
+  // 1) Empilha as planilhas (pela posição das colunas); 2) opcionalmente soma itens iguais.
+  const empilhadas = useMemo(
+    () => arquivos.flatMap((a, ai) => a.linhas.map((r, li) => ({ k: `${ai}-${li}`, cells: preencher(r, nCols) }))),
+    [arquivos, nCols],
+  )
+  const linhasBase = useMemo(
+    () => (soma ? somarLinhas(empilhadas, soma.chaves, soma.qtd) : empilhadas),
+    [empilhadas, soma],
+  )
+  // Colunas da planilha sem nenhum conteúdo: podem ser excluídas.
+  const vazias = useMemo(
+    () => new Set(colunas.filter((c) => c.tipo === 'dado' && empilhadas.every((l) => texto(l.cells[c.origem]).trim() === '')).map((c) => c.id)),
+    [colunas, empilhadas],
   )
 
-  // 3) Ordena tudo (é esta ordem que vai para o arquivo final)
-  const ordenados = useMemo(() => [...completos].sort((a, b) => comparar(a, b, ordem)), [completos, ordem])
-
-  // 4) Aplica filtro de bairro e busca (afeta só o que aparece na tela)
+  // 3) Filtros, busca e ordenação: é o que aparece na tela e vai para o arquivo final.
   const visiveis = useMemo(() => {
     const termo = busca.toLowerCase().trim()
-    return ordenados
-      .filter((i) => !bairro || i.bairro === bairro)
-      .filter((i) => !termo || COLUNAS_TELA.map((c) => i[c.chave]).join(' ').toLowerCase().includes(termo))
-  }, [ordenados, bairro, busca])
+    let lista = linhasBase.filter((l) =>
+      Object.entries(filtros).every(([id, sel]) => {
+        const c = porId[id]
+        return !c || !sel.length || sel.includes(normalizar(valorCelula(l, c, porId, valores)))
+      }),
+    )
+    if (termo) {
+      lista = lista.filter((l) => colunas.some((c) => texto(valorCelula(l, c, porId, valores)).toLowerCase().includes(termo)))
+    }
+    const col = porId[ordem.id]
+    if (col) {
+      lista = [...lista].sort(
+        (a, b) => compararValores(valorCelula(a, col, porId, valores), valorCelula(b, col, porId, valores)) * ordem.dir,
+      )
+    }
+    return lista
+  }, [linhasBase, filtros, busca, ordem, colunas, porId, valores])
 
-  const bairros = useMemo(() => {
-    const contagem = {}
-    completos.forEach((i) => {
-      contagem[i.bairro] = (contagem[i.bairro] || 0) + 1
-    })
-    return Object.keys(contagem)
-      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
-      .map((nome) => ({ nome, qtd: contagem[nome] }))
-  }, [completos])
+  // ---- Ações ----
+  const acoes = {
+    renomear: (id, nome) =>
+      mudarLayout((l) => ({ ...l, colunas: l.colunas.map((c) => (c.id === id ? { ...c, nome } : c)) })),
 
-  const totalUnidades = visiveis.reduce((soma, i) => soma + i.quantidade, 0)
-  const comPreco = completos.filter((i) => paraNumero(i.preco) !== '').length
+    mover: (id, delta) =>
+      mudarLayout((l) => {
+        const cols = [...l.colunas]
+        const i = cols.findIndex((c) => c.id === id)
+        const j = i + delta
+        if (i < 0 || j < 0 || j >= cols.length) return l
+        const temp = cols[i]
+        cols[i] = cols[j]
+        cols[j] = temp
+        return { ...l, colunas: cols }
+      }),
 
-  function ordenarPor(chave) {
-    setOrdem((o) => (o.chave === chave ? { chave, dir: -o.dir } : { chave, dir: 1 }))
+    ordenar: (id) => setOrdem((o) => (o.id === id ? { id, dir: -o.dir } : { id, dir: 1 })),
+
+    excluir: (id) => {
+      const col = porId[id]
+      if (!col) return
+      if (col.tipo === 'dado') {
+        // Colunas de preço/observação que usam esta como identificador do produto: bloqueia.
+        const dependentes = colunas.filter((c) => c.tipo !== 'dado' && c.chave === id)
+        if (dependentes.length) {
+          alert(
+            `Não é possível excluir "${col.nome || 'esta coluna'}": ela identifica o produto em ` +
+              `${dependentes.map((c) => `"${c.nome}"`).join(', ')}. Exclua essas colunas antes.`,
+          )
+          return
+        }
+        const naSoma = soma && (soma.chaves.includes(col.origem) || soma.qtd === col.origem)
+        if (!vazias.has(id)) {
+          const aviso = `Excluir a coluna "${col.nome || 'sem nome'}"? Ela só será ocultada: a planilha original não muda e dá para restaurá-la depois.`
+          if (!confirm(aviso + (naSoma ? ' A soma ativa usa esta coluna e será desfeita.' : ''))) return
+        }
+        if (naSoma) setSoma(null)
+      } else if (!confirm(`Excluir a coluna "${col.nome}" e os valores digitados nela?`)) {
+        return
+      }
+      mudarLayout((l) => ({
+        colunas: l.colunas.filter((c) => c.id !== id),
+        removidas: col.tipo === 'dado' ? [...l.removidas, id] : l.removidas,
+      }))
+      if (col.tipo !== 'dado') {
+        setValores((v) => {
+          const novo = { ...v }
+          delete novo[id]
+          return novo
+        })
+      }
+      setFiltros((f) => {
+        const novo = { ...f }
+        delete novo[id]
+        return novo
+      })
+      if (ordem.id === id) setOrdem({ id: null, dir: 1 })
+    },
+
+    adicionar: (posicao) => setDialogo({ tipo: 'adicionar', posicao }),
+
+    // Grava o valor digitado, ligado ao conteúdo da coluna "chave" (ex.: o código).
+    editar: (col, linha, valor) => {
+      const chave = chaveLinha(linha, col, porId)
+      if (!chave) return
+      setValores((v) => ({ ...v, [col.id]: { ...v[col.id], [chave]: valor } }))
+    },
   }
 
-  // Preço, anotação e código de barras ficam guardados por código de produto.
-  function editar(campo, codigo, valor) {
-    const gravar = { preco: setPrecos, obs: setObs, ean: setBarras }[campo]
-    gravar((atual) => ({ ...atual, [codigo]: valor }))
+  function criarColuna({ tipo, nome, chave }) {
+    const id = `${tipo === 'preco' ? 'p' : 'o'}${Date.now()}`
+    const posicao = dialogo.posicao
+    mudarLayout((l) => {
+      const cols = [...l.colunas]
+      cols.splice(posicao, 0, { id, tipo, nome, chave })
+      return { ...l, colunas: cols }
+    })
+    setDialogo(null)
   }
 
   // Planilha com o mesmo nome substitui a anterior (evita somar duas vezes sem querer).
-  function adicionar(novos) {
+  function adicionarArquivos(novos) {
     setArquivos((atual) => [...atual.filter((a) => !novos.some((n) => n.nome === a.nome)), ...novos])
-    setBairro('')
+    setFiltros({})
   }
 
   function limparPlanilhas() {
-    if (confirm('Remover todas as planilhas carregadas? Os preços digitados serão mantidos.')) {
+    if (confirm('Remover todas as planilhas carregadas? Nomes de colunas e valores digitados são mantidos.')) {
       setArquivos([])
-      setBairro('')
+      setFiltros({})
+      setSoma(null)
+    }
+  }
+  // As colunas excluídas voltam no fim da tabela, com os nomes padrão.
+  function restaurarExcluidas() {
+    mudarLayout((l) => ({ ...l, removidas: [] }));
+  }
+  {
+    layout.removidas.length > 0 && (
+      <button className="botao sec" onClick={restaurarExcluidas}>
+        Restaurar colunas excluídas ({layout.removidas.length})
+      </button>
+    );
+  }
+  function redefinirColunas() {
+    if (confirm('Voltar às colunas originais? As colunas de preço/observação criadas serão removidas.')) {
+      setLayouts((ls) => ({ ...ls, [nCols]: layoutVazio }))
+      setValores({})
+      setFiltros({})
+      setOrdem({ id: null, dir: 1 })
     }
   }
 
+  const ativos = Object.values(filtros).filter((s) => s.length)
+  // Se houver um único valor filtrado, ele entra no nome do arquivo (ex.: cotacao_final_BARROSO.xlsx)
+  const sufixo =
+    ativos.length === 1 && ativos[0].length === 1 && ativos[0][0]
+      ? '_' + ativos[0][0].replace(/[^\p{L}\p{N}]+/gu, '_')
+      : ''
 
+  function gerarArquivo() {
+    const titulos = colunas.map((c) => c.nome || 'Coluna')
+    const matriz = visiveis.map((l) =>
+      colunas.map((c) => {
+        const v = valorCelula(l, c, porId, valores)
+        return c.tipo === 'preco' ? paraNumero(v) : seguroParaExcel(v)
+      }),
+    )
+    const idxPreco = colunas.map((c, i) => (c.tipo === 'preco' ? i : -1)).filter((i) => i >= 0)
+    exportarXlsx(titulos, matriz, idxPreco, `cotacao_final${sufixo}.xlsx`)
+  }
 
-  
+  const colunasDado = colunas.filter((c) => c.tipo === 'dado' && !vazias.has(c.id))
+
   return (
     <main>
       <h1>Painel de Cotação</h1>
 
       <div className="barra">
-        <FileLoader onCarregar={adicionar} />
+        <FileLoader onCarregar={adicionarArquivos} />
         <input
           type="search"
-          placeholder="Buscar produto, fabricante ou código"
+          placeholder="Buscar em todas as colunas"
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
         />
       </div>
 
-      <ArquivosCarregados arquivos={arquivos} onRemover={(nome) => setArquivos((a) => a.filter((x) => x.nome !== nome))} />
+      <ArquivosCarregados
+        arquivos={arquivos}
+        onRemover={(nome) => {
+          setArquivos((a) => a.filter((x) => x.nome !== nome))
+          setFiltros({})
+        }}
+      />
 
-      {completos.length === 0 ? (
+      {linhasBase.length === 0 ? (
         <p className="vazio">
           Nenhuma planilha carregada. Toque em “Adicionar planilha” e escolha um ou mais arquivos.
         </p>
       ) : (
         <>
-          <BairroFilter bairros={bairros} selecionado={bairro} total={completos.length} onSelecionar={setBairro} />
-          <p className="resumo">
-            <b>{visiveis.length}</b> itens · <b>{totalUnidades}</b> unidades · preços preenchidos:{' '}
-            <b>{comPreco}</b> de {completos.length}
-          </p>
-          <DataTable itens={visiveis} colunas={colunas} ordem={ordem} onOrdenar={ordenarPor} onMover={moverColuna}onEditar={editar} />
-          <div className="barra rodape">
-            <button className="botao" 
-                    onClick={() => 
-                    exportarXlsx(visiveis, colunas, `cotacao_final${bairro ? '_' + bairro.replace(/\s+/g, '_') : ''}.xlsx`)}>
-                    Gerar arquivo final (com preços)
+          <div className="barra">
+            <button className="botao sec" onClick={() => setDialogo({ tipo: 'filtro' })}>
+              Filtro{ativos.length ? ` (${ativos.length})` : ''}
             </button>
-            <button className="botao sec" 
-                    onClick={() => 
-                    setOrdemCols(COLUNAS_TELA.map((c) => c.chave))}>
-                    Restaurar ordem das colunas
-            </button>
-            <button className="botao sec" 
-                    onClick={limparPlanilhas}>
-                    Limpar planilhas
+            <button className="botao sec" onClick={() => setDialogo({ tipo: 'soma' })}>
+              {soma ? 'Soma ativa (ajustar)' : 'Somar itens iguais'}
             </button>
           </div>
+
+          {ativos.length > 0 && (
+            <div className="chips">
+              {Object.entries(filtros)
+                .filter(([, s]) => s.length)
+                .map(([id, s]) => (
+                  <button
+                    key={id}
+                    className="chip"
+                    aria-pressed="true"
+                    onClick={() =>
+                      setFiltros((f) => {
+                        const novo = { ...f }
+                        delete novo[id]
+                        return novo
+                      })
+                    }
+                  >
+                    {porId[id]?.nome || 'Coluna'}: {s.map((x) => x || '(vazio)').join(', ')} ✕
+                  </button>
+                ))}
+            </div>
+          )}
+
+          <p className="resumo">
+            <b>{visiveis.length}</b> de {linhasBase.length} linhas
+          </p>
+
+          <DataTable
+            colunas={colunas}
+            linhas={visiveis}
+            porId={porId}
+            valores={valores}
+            ordem={ordem}
+            vazias={vazias}
+            acoes={acoes}
+          />
+
+          <div className="barra rodape">
+            <button className="botao" onClick={gerarArquivo}>
+              Gerar arquivo final (linhas exibidas)
+            </button>
+            <button className="botao sec" onClick={redefinirColunas}>Redefinir colunas</button>
+            <button className="botao sec" onClick={limparPlanilhas}>Limpar planilhas</button>
+          </div>
         </>
+      )}
+
+      {dialogo?.tipo === 'filtro' && (
+        <PainelFiltro
+          colunas={colunas}
+          linhasBase={linhasBase}
+          porId={porId}
+          valores={valores}
+          filtros={filtros}
+          onMudar={setFiltros}
+          onFechar={() => setDialogo(null)}
+        />
+      )}
+      {dialogo?.tipo === 'adicionar' && (
+        <DialogoAdicionar colunasChave={colunasDado} 
+        onConfirmar={criarColuna} 
+        onCancelar={() =>setDialogo(null)}/>
+      )}
+      {dialogo?.tipo === 'soma' && (
+        <DialogoSoma
+          colunasDado={colunasDado}
+          atual={soma}
+          onConfirmar={(s) => {
+            setSoma(s)
+            setDialogo(null)
+          }}
+          onDesfazer={() => {
+            setSoma(null)
+            setDialogo(null)
+          }}
+          onCancelar={() => setDialogo(null)}
+        />
       )}
     </main>
   )

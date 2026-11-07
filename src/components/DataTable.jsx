@@ -1,115 +1,83 @@
-import { Fragment } from 'react'
+import CabecalhoColuna from './CabecalhoColuna'
 import { formatarPreco } from '../utils/exportar'
+import { texto, valorCelula, chaveLinha } from '../utils/tabela'
 
-// Células editáveis: preço, anotação e código de barras (só quando a planilha não trouxe o EAN).
-function Celula({ item, coluna, onEditar,}) {
-  const { chave } = coluna
-  if (chave === 'preco') {
+// Dado da planilha (somente leitura) ou campo digitável (preço / observação).
+function Celula({ coluna, linha, valor, desativado, onEditar }) {
+  if (coluna.tipo === 'preco') {
     return (
       <input
         className="campo preco"
         inputMode="decimal"
         placeholder="0,00"
-        value={item.preco}
-        onChange={(e) => onEditar('preco', item.codigo, e.target.value.replace(/[^\d.,]/g, ''))}
-        onBlur={(e) => onEditar('preco', item.codigo, formatarPreco(e.target.value))}
-        aria-label={`Preço de ${item.produto}`}
+        disabled={desativado}
+        value={valor}
+        onChange={(e) => onEditar(coluna, linha, e.target.value.replace(/[^\d.,]/g, ''))}
+        onBlur={(e) => onEditar(coluna, linha, formatarPreco(e.target.value))}
+        aria-label={coluna.nome || 'Preço'}
       />
     )
   }
-  if (chave === 'obs') {
+  if (coluna.tipo === 'obs') {
     return (
       <input
         className="campo"
         placeholder="Anotação"
-        value={item.obs}
-        onChange={(e) => onEditar('obs', item.codigo, e.target.value)}
-        aria-label={`Anotação de ${item.produto}`}
+        disabled={desativado}
+        value={valor}
+        onChange={(e) => onEditar(coluna, linha, e.target.value)}
+        aria-label={coluna.nome || 'Observação'}
       />
     )
   }
-  if (chave === 'ean' && !item.temEan) {
-    return (
-      <input
-        className="campo"
-        inputMode="numeric"
-        placeholder="Código de barras"
-        value={item.ean}
-        onChange={(e) => onEditar('ean', item.codigo, e.target.value)}
-        aria-label={`Código de barras de ${item.produto}`}
-      />
-    )
-  }
-  return String(item[chave])
+  return texto(valor)
 }
 
-// Tabela de itens. Tocar no título de uma coluna ordena por ela.
-// Quando a ordenação é por bairro, aparece uma faixa de título a cada bairro novo.
-export default function DataTable({ itens, colunas, ordem, onOrdenar, onEditar, onMover }){
-  const agrupar = ordem.chave === 'bairro'
-  let anterior = null
-
+// "acoes" reúne as funções do cabeçalho: renomear, mover, ordenar, excluir, adicionar, editar.
+export default function DataTable({ colunas, linhas, porId, valores, ordem, vazias, acoes }) {
   return (
     <div className="tabela-wrap">
       <table>
         <thead>
           <tr>
-              {colunas.map((c, i) => (
-              <th key={c.chave} onClick={() => onOrdenar(c.chave)}>
-                <div className="cab">
-                  {/* stopPropagation: evita que o toque na seta também ordene a coluna */}
-                  <button
-                    className="seta"
-                    disabled={i === 0}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onMover(c.chave, -1)
-                    }}
-                    aria-label={`Mover ${c.titulo} para a esquerda`}
-                  >
-                    ◀
-                  </button>
-                  <span>
-                    {c.titulo}
-                    {ordem.chave === c.chave ? (ordem.dir > 0 ? ' ▲' : ' ▼') : ''}
-                  </span>
-                  <button
-                    className="seta"
-                    disabled={i === colunas.length - 1}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onMover(c.chave, 1)
-                    }}
-                    aria-label={`Mover ${c.titulo} para a direita`}
-                  >
-                    ▶
-                  </button>
-                </div>
-              </th>
+            <th className="canto">
+              <button className="seta mais" onClick={() => acoes.adicionar(0)}
+                aria-label="Adicionar coluna no início">+</button>
+            </th>
+            {colunas.map((c, i) => (
+              <CabecalhoColuna
+                key={c.id}
+                coluna={c}
+                indice={i}
+                total={colunas.length}
+                ordem={ordem}
+                vazia={vazias.has(c.id)}
+                onRenomear={acoes.renomear}
+                onMover={acoes.mover}
+                onOrdenar={acoes.ordenar}
+                onExcluir={acoes.excluir}
+                onAdicionar={acoes.adicionar}
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {itens.map((item) => {
-            const novoGrupo = agrupar && item.bairro !== anterior
-            anterior = item.bairro
-            return (
-              <Fragment key={`${item.codigo}|${item.bairro}`}>
-                {novoGrupo && (
-                  <tr className="grupo">
-                    <td colSpan={colunas.length}>{item.bairro || 'Sem bairro'}</td>
-                  </tr>
-                )}
-                <tr>
-                  {colunas.map((c) => (
-                    <td key={c.chave} className={c.chave === 'quantidade' ? 'num' : ''}>
-                      <Celula item={item} coluna={c} onEditar={onEditar} />
-                    </td>
-                  ))}
-                </tr>
-              </Fragment>
-            )
-          })}
+          {linhas.map((l) => (
+            <tr key={l.k}>
+              <td className="canto" />
+              {colunas.map((c) => (
+                <td key={c.id}>
+                  <Celula
+                    coluna={c}
+                    linha={l}
+                    valor={valorCelula(l, c, porId, valores)}
+                    desativado={c.tipo !== 'dado' && !chaveLinha(l, c, porId)}
+                    onEditar={acoes.editar}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

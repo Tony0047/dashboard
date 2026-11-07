@@ -13,7 +13,7 @@ export default class ErroTela extends Component {
   limpar = () => {
     try {
       Object.keys(localStorage)
-        .filter((k) => k.startsWith('painel:'))
+        .filter((k) => k.startsWith('painel'))
         .forEach((k) => localStorage.removeItem(k))
     } catch {
       /* ignora */

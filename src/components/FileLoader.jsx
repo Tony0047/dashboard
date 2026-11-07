@@ -1,8 +1,7 @@
 import { lerPlanilha } from '../utils/parseExcel'
-import { useState } from 'react'
 
 // Botão que permite escolher UMA OU MAIS planilhas (atributo "multiple").
-// Entrega ao App uma lista de { nome, itens }.
+// Entrega ao App uma lista de { nome, linhas, colunas }.
 export default function FileLoader({ onCarregar }) {
   async function aoEscolher(evento) {
     const arquivos = [...evento.target.files]
@@ -12,7 +11,7 @@ export default function FileLoader({ onCarregar }) {
       const lidos = []
       for (const arquivo of arquivos) {
         try {
-          lidos.push({ nome: arquivo.name, itens: await lerPlanilha(arquivo) })
+          lidos.push({ nome: arquivo.name, ...(await lerPlanilha(arquivo)) })
         } catch {
           alert(`Não foi possível ler "${arquivo.name}". Use uma planilha Excel (.xlsx) ou CSV.`)
         }
