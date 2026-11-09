@@ -20,15 +20,17 @@ export const nomeInicial = (i, total) => (total === 7 ? NOMES_7[i] : `Coluna ${l
 //   removidas: ids de colunas da planilha que o usuário excluiu (não voltam sozinhas)
 export const layoutVazio = { colunas: [], removidas: [] }
 
-// Garante que todas as colunas da planilha existam no layout, sem trazer de volta as removidas.
-export function reconciliar(layout, total) {
+// Garante que todas as colunas existam no layout, sem trazer de volta as removidas.
+// "nomes" (opcional): nomes padrão por posição, usados na visão de várias planilhas.
+export function reconciliar(layout, total, nomes) {
   const existentes = new Set(layout.colunas.filter((c) => c.tipo === 'dado').map((c) => c.id))
   const removidas = new Set(layout.removidas)
   const novas = []
   for (let i = 0; i < total; i++) {
     const id = `c${i}`
     if (!existentes.has(id) && !removidas.has(id)) {
-      novas.push({ id, tipo: 'dado', origem: i, nome: nomeInicial(i, total) })
+      const nome = nomes ? nomes[i] || `Coluna ${letraColuna(i)}` : nomeInicial(i, total)
+      novas.push({ id, tipo: 'dado', origem: i, nome })
     }
   }
   return novas.length ? { ...layout, colunas: [...layout.colunas, ...novas] } : layout

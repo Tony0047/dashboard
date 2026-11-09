@@ -17,9 +17,9 @@ import ErroTela from './components/ErroTela'
 function Painel() {
   // Dados que sobrevivem ao fechar o app.
   const [arquivos, setArquivos] = useLocalStorage('painel2:arquivos', []) // [{ nome, linhas, colunas }]
-  const [layouts, setLayouts] = useLocalStorage('painel2:layouts', {}) // um layout por quantidade de colunas
+  const [layouts, setLayouts] = useLocalStorage('painel2:layouts', {}) // 'f:<planilha>' ou 'm:<planilhas>' -> layout
   const [valores, setValores] = useLocalStorage('painel2:valores', {}) // { idColuna: { chave: texto } }
-  const [soma, setSoma] = useLocalStorage('painel2:soma', null) // { chaves: [origem], qtd: origem }
+  const [somas, setSomas] = useLocalStorage('painel2:somas', {}) // por visão: { chaves: [posição], qtd: posição }
   const [desmarcados, setDesmarcados] = useLocalStorage('painel2:desmarcados', []) // planilhas fora da tabela
   // Estado só da tela atual.
   const [busca, setBusca] = useState('')
@@ -27,29 +27,66 @@ function Painel() {
   const [filtros, setFiltros] = useState({}) // { idColuna: [valores normalizados] }
   const [dialogo, setDialogo] = useState(null) // { tipo: 'filtro' | 'soma' | 'adicionar', posicao? }
 
-  // ---- Colunas (layout) ----
-  //const nCols = Math.max(0, ...arquivos.map((a) => a.colunas))
-    // Só as planilhas marcadas entram na tabela.
+  // ---- Qual visão está na tela ----
+  // Uma planilha marcada  -> visão 'f:<nome>': as alterações valem para ESSA planilha.
+  // Várias marcadas       -> visão 'm:<nomes>': mostra as planilhas alinhadas pela posição das colunas
+  //                          que você deixou em cada uma; as alterações valem só para essa combinação.
   const selecionadas = useMemo(() => arquivos.filter((a) => !desmarcados.includes(a.nome)), [arquivos, desmarcados])
-  const nCols = Math.max(0, ...selecionadas.map((a) => a.colunas))
-  const layoutSalvo = layouts[nCols] ?? layoutVazio
-  const layout = useMemo(() => reconciliar(layoutSalvo, nCols), [layoutSalvo, nCols])
+  const varias = selecionadas.length > 1
+  const chave = !selecionadas.length
+    ? null
+    : varias
+      ? 'm:' + selecionadas.map((a) => a.nome).sort().join('|')
+      : 'f:' + selecionadas[0].nome
+
+  // Arranjo (colunas na ordem que você deixou, sem as excluídas) de cada planilha marcada.
+  const arranjos = useMemo(
+    () => selecionadas.map((a) => reconciliar(layouts['f:' + a.nome] ?? layoutVazio, a.colunas)),
+    [selecionadas, layouts],
+  )
+
+  // Linhas da visão atual. "cells" já vem na ordem das colunas da visão.
+  const base = useMemo(() => {
+    if (!selecionadas.length) return { linhas: [], nCols: 0, nomes: undefined }
+    if (!varias) {
+      const a = selecionadas[0]
+      return { linhas: a.linhas.map((r, li) => ({ k: `0-${li}`, cells: r })), nCols: a.colunas, nomes: undefined }
+    }
+    const origens = arranjos.map((l) => l.colunas.filter((c) => c.tipo === 'dado').map((c) => c.origem))
+    const nCols = Math.max(0, ...origens.map((o) => o.length))
+    const linhas = selecionadas.flatMap((a, ai) =>
+      a.linhas.map((r, li) => ({ k: `${ai}-${li}`, cells: preencher(origens[ai].map((o) => r[o] ?? ''), nCols) })),
+    )
+    // Nomes padrão da combinação: os da primeira planilha marcada.
+    const nomes = arranjos[0].colunas.filter((c) => c.tipo === 'dado').map((c) => c.nome)
+    return { linhas, nCols, nomes }
+  }, [selecionadas, varias, arranjos])
+  const { nCols, nomes } = base
+
+  const layoutSalvo = (chave && layouts[chave]) || layoutVazio
+  const layout = useMemo(() => reconciliar(layoutSalvo, nCols, nomes), [layoutSalvo, nCols, nomes])
   const colunas = layout.colunas
   const porId = useMemo(() => Object.fromEntries(colunas.map((c) => [c.id, c])), [colunas])
   const mudarLayout = (fn) =>
-  setLayouts((ls) => ({ ...ls, [nCols]: fn(reconciliar(ls[nCols] ?? layoutVazio, nCols)) }))
+    setLayouts((ls) => ({ ...ls, [chave]: fn(reconciliar(ls[chave] ?? layoutVazio, nCols, nomes)) }))
+
+  // Soma de itens iguais: guardada por visão (as posições mudam de uma visão para outra).
+  const soma = (chave && somas[chave]) || null
+  const setSoma = (valor) =>
+    setSomas((s) => {
+      const novo = { ...s }
+      if (valor) novo[chave] = valor
+      else delete novo[chave]
+      return novo
+    })
 
   // ---- Linhas ----
-  // 1) Empilha as planilhas (pela posição das colunas); 2) opcionalmente soma itens iguais.
-  const empilhadas = useMemo(
-    () => selecionadas.flatMap((a, ai) => a.linhas.map((r, li) => ({ k: `${ai}-${li}`, cells: preencher(r, nCols) }))),
-    [selecionadas, nCols],
-  )
+  const empilhadas = base.linhas
   const linhasBase = useMemo(
     () => (soma ? somarLinhas(empilhadas, soma.chaves, soma.qtd) : empilhadas),
     [empilhadas, soma],
   )
-  // Colunas da planilha sem nenhum conteúdo: podem ser excluídas.
+  // Colunas sem nenhum conteúdo (só marca "vazia" no cabeçalho).
   const vazias = useMemo(
     () => new Set(colunas.filter((c) => c.tipo === 'dado' && empilhadas.every((l) => texto(l.cells[c.origem]).trim() === '')).map((c) => c.id)),
     [colunas, empilhadas],
@@ -167,23 +204,18 @@ function Painel() {
     if (confirm('Remover todas as planilhas carregadas? Nomes de colunas e valores digitados são mantidos.')) {
       setArquivos([])
       setFiltros({})
-      setSoma(null)
+      setSomas({})
     }
   }
+
   // As colunas excluídas voltam no fim da tabela, com os nomes padrão.
   function restaurarExcluidas() {
-    mudarLayout((l) => ({ ...l, removidas: [] }));
+    mudarLayout((l) => ({ ...l, removidas: [] }))
   }
-  {
-    layout.removidas.length > 0 && (
-      <button className="botao sec" onClick={restaurarExcluidas}>
-        Restaurar colunas excluídas ({layout.removidas.length})
-      </button>
-    );
-  }
+
   function redefinirColunas() {
     if (confirm('Voltar às colunas originais? As colunas de preço/observação criadas serão removidas.')) {
-      setLayouts((ls) => ({ ...ls, [nCols]: layoutVazio }))
+      setLayouts((ls) => ({ ...ls, [chave]: layoutVazio }))
       setValores({})
       setFiltros({})
       setOrdem({ id: null, dir: 1 })
@@ -225,13 +257,12 @@ function Painel() {
         />
       </div>
 
-// Lista as planilhas carregadas; a caixa marca quais entram na tabela. ✕ remove a planilha.
       <ArquivosCarregados
         arquivos={arquivos}
         desmarcados={desmarcados}
         onAlternar={(nome) => {
-          setDesmarcados((d) => 
-            (d.includes(nome) ? d.filter((x) => x !== nome) : [...d, nome]))
+          setDesmarcados((d) => (d.includes(nome) ? d.filter((x) => x !== nome) : [...d, nome]))
+          setFiltros({})
         }}
         onRemover={(nome) => {
           setArquivos((a) => a.filter((x) => x.nome !== nome))
@@ -240,9 +271,18 @@ function Painel() {
         }}
       />
 
+      {selecionadas.length > 0 && (
+        <p className="ajuda">
+          {varias
+            ? 'Exibindo as planilhas marcadas, alinhadas pela posição das colunas. Para mudar a ordem ou excluir colunas de uma planilha, deixe só ela marcada.'
+            : 'Editando esta planilha: renomear, mover e excluir colunas valem só para ela.'}
+        </p>
+      )}
+
       {linhasBase.length === 0 ? (
-        <p className="vazio"> {arquivos.length ? 
-          'Nenhuma planilha marcada. Marque ao menos uma na lista acima.'
+        <p className="vazio">
+          {arquivos.length
+            ? 'Nenhuma planilha marcada. Marque ao menos uma na lista acima.'
             : 'Nenhuma planilha carregada. Toque em “Adicionar planilha” e escolha um ou mais arquivos.'}
         </p>
       ) : (
@@ -297,6 +337,11 @@ function Painel() {
             <button className="botao" onClick={gerarArquivo}>
               Gerar arquivo final (linhas exibidas)
             </button>
+            {layout.removidas.length > 0 && (
+              <button className="botao sec" onClick={restaurarExcluidas}>
+                Restaurar colunas excluídas ({layout.removidas.length})
+              </button>
+            )}
             <button className="botao sec" onClick={redefinirColunas}>Redefinir colunas</button>
             <button className="botao sec" onClick={limparPlanilhas}>Limpar planilhas</button>
           </div>
@@ -315,9 +360,7 @@ function Painel() {
         />
       )}
       {dialogo?.tipo === 'adicionar' && (
-        <DialogoAdicionar colunasChave={colunasDado} 
-        onConfirmar={criarColuna} 
-        onCancelar={() =>setDialogo(null)}/>
+        <DialogoAdicionar colunasChave={colunasDado} onConfirmar={criarColuna} onCancelar={() => setDialogo(null)} />
       )}
       {dialogo?.tipo === 'soma' && (
         <DialogoSoma
