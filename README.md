@@ -136,8 +136,8 @@ src/
 
 ## Licença
 
-A definir. <!-- Sugestão: MIT -->
+MIT
 
 ## Autor
 
-<!-- Seu nome e links (GitHub, LinkedIn) -->
+Tony0047
