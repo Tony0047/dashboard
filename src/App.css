@@ -60,3 +60,5 @@ small.vazia { color: var(--mut); font-weight: 400; }
 .lista-valores { max-height: 40vh; overflow: auto; border: 1px solid var(--bd); border-radius: 8px; padding: 4px 10px; margin: 8px 0; }
 .modal .barra { justify-content: flex-end; margin: 12px 0 0; }
 button:disabled { opacity: 0.5; cursor: default; }
+.fontes li label { display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer; }
+.fontes input[type='checkbox'] { width: 24px; height: 24px; flex: none; }

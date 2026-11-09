@@ -20,6 +20,7 @@ function Painel() {
   const [layouts, setLayouts] = useLocalStorage('painel2:layouts', {}) // um layout por quantidade de colunas
   const [valores, setValores] = useLocalStorage('painel2:valores', {}) // { idColuna: { chave: texto } }
   const [soma, setSoma] = useLocalStorage('painel2:soma', null) // { chaves: [origem], qtd: origem }
+  const [desmarcados, setDesmarcados] = useLocalStorage('painel2:desmarcados', []) // planilhas fora da tabela
   // Estado só da tela atual.
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState({ id: null, dir: 1 })
@@ -27,7 +28,10 @@ function Painel() {
   const [dialogo, setDialogo] = useState(null) // { tipo: 'filtro' | 'soma' | 'adicionar', posicao? }
 
   // ---- Colunas (layout) ----
-  const nCols = Math.max(0, ...arquivos.map((a) => a.colunas))
+  //const nCols = Math.max(0, ...arquivos.map((a) => a.colunas))
+    // Só as planilhas marcadas entram na tabela.
+  const selecionadas = useMemo(() => arquivos.filter((a) => !desmarcados.includes(a.nome)), [arquivos, desmarcados])
+  const nCols = Math.max(0, ...selecionadas.map((a) => a.colunas))
   const layoutSalvo = layouts[nCols] ?? layoutVazio
   const layout = useMemo(() => reconciliar(layoutSalvo, nCols), [layoutSalvo, nCols])
   const colunas = layout.colunas
@@ -38,8 +42,8 @@ function Painel() {
   // ---- Linhas ----
   // 1) Empilha as planilhas (pela posição das colunas); 2) opcionalmente soma itens iguais.
   const empilhadas = useMemo(
-    () => arquivos.flatMap((a, ai) => a.linhas.map((r, li) => ({ k: `${ai}-${li}`, cells: preencher(r, nCols) }))),
-    [arquivos, nCols],
+    () => selecionadas.flatMap((a, ai) => a.linhas.map((r, li) => ({ k: `${ai}-${li}`, cells: preencher(r, nCols) }))),
+    [selecionadas, nCols],
   )
   const linhasBase = useMemo(
     () => (soma ? somarLinhas(empilhadas, soma.chaves, soma.qtd) : empilhadas),
@@ -221,17 +225,25 @@ function Painel() {
         />
       </div>
 
+// Lista as planilhas carregadas; a caixa marca quais entram na tabela. ✕ remove a planilha.
       <ArquivosCarregados
         arquivos={arquivos}
+        desmarcados={desmarcados}
+        onAlternar={(nome) => {
+          setDesmarcados((d) => 
+            (d.includes(nome) ? d.filter((x) => x !== nome) : [...d, nome]))
+        }}
         onRemover={(nome) => {
           setArquivos((a) => a.filter((x) => x.nome !== nome))
+          setDesmarcados((d) => d.filter((x) => x !== nome))
           setFiltros({})
         }}
       />
 
       {linhasBase.length === 0 ? (
-        <p className="vazio">
-          Nenhuma planilha carregada. Toque em “Adicionar planilha” e escolha um ou mais arquivos.
+        <p className="vazio"> {arquivos.length ? 
+          'Nenhuma planilha marcada. Marque ao menos uma na lista acima.'
+            : 'Nenhuma planilha carregada. Toque em “Adicionar planilha” e escolha um ou mais arquivos.'}
         </p>
       ) : (
         <>
